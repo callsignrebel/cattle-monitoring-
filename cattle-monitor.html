@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Herdwatch — Smart Cattle Health Monitoring</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #ECEEE3;
+    --panel: #FFFFFF;
+    --panel-2: #F5F5EC;
+    --text: #1F2A1C;
+    --text-secondary: #5B6B54;
+    --border: #D8D5C5;
+    --healthy: #4C7A3B;
+    --healthy-bg: #E4EEDD;
+    --warning: #B8790F;
+    --warning-bg: #F6E9D2;
+    --critical: #A23325;
+    --critical-bg: #F5DEDA;
+    --data: #2E6E93;
+    --data-bg: #DDEAF2;
+    --shadow: 0 1px 2px rgba(20,20,10,0.06), 0 4px 16px rgba(20,20,10,0.05);
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #10140D;
+      --panel: #1A2015;
+      --panel-2: #171C13;
+      --text: #EDE8D8;
+      --text-secondary: #9BA48B;
+      --border: #2A3122;
+      --healthy: #7FBE68;
+      --healthy-bg: #1E2A18;
+      --warning: #E3A83E;
+      --warning-bg: #2E250F;
+      --critical: #E15B45;
+      --critical-bg: #331711;
+      --data: #5FA6D6;
+      --data-bg: #132531;
+      --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 6px 20px rgba(0,0,0,0.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #10140D;
+    --panel: #1A2015;
+    --panel-2: #171C13;
+    --text: #EDE8D8;
+    --text-secondary: #9BA48B;
+    --border: #2A3122;
+    --healthy: #7FBE68;
+    --healthy-bg: #1E2A18;
+    --warning: #E3A83E;
+    --warning-bg: #2E250F;
+    --critical: #E15B45;
+    --critical-bg: #331711;
+    --data: #5FA6D6;
+    --data-bg: #132531;
+    --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 6px 20px rgba(0,0,0,0.35);
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    transition: background 0.3s ease, color 0.3s ease;
+  }
+  h1, h2, h3 { font-family: 'Fraunces', serif; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+  a { color: inherit; }
+  button { font-family: inherit; }
+
+  /* ---------- Top bar ---------- */
+  .topbar {
+    position: sticky; top: 0; z-index: 40;
+    padding: env(safe-area-inset-top, 0px) 0 0 0;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+  }
+  .topbar-inner {
+    max-width: 1180px; margin: 0 auto;
+    padding: 14px 20px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  .brand { display: flex; align-items: baseline; gap: 10px; margin-right: auto; }
+  .brand h1 { font-size: 22px; }
+  .brand .sub { color: var(--text-secondary); font-size: 13px; }
+  .simclock { font-size: 12.5px; color: var(--text-secondary); }
+  .simclock b { color: var(--text); font-weight: 600; }
+
+  .tabs { display: flex; background: var(--panel-2); border: 1px solid var(--border); border-radius: 9px; padding: 3px; gap: 2px; }
+  .tabs button {
+    border: none; background: transparent; color: var(--text-secondary);
+    padding: 7px 14px; border-radius: 7px; font-size: 13.5px; font-weight: 500;
+    cursor: pointer; transition: background 0.15s, color 0.15s;
+  }
+  .tabs button.active { background: var(--panel); color: var(--text); box-shadow: var(--shadow); }
+
+  .theme-toggle {
+    border: 1px solid var(--border); background: var(--panel); color: var(--text-secondary);
+    width: 32px; height: 32px; border-radius: 8px; cursor: pointer; font-size: 14px;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* ---------- Layout ---------- */
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 20px; padding-bottom: 60px; }
+  .grid-main { display: grid; grid-template-columns: 1fr 320px; gap: 20px; align-items: start; }
+  @media (max-width: 880px) { .grid-main { grid-template-columns: 1fr; } }
+
+  /* ---------- Health summary bar ---------- */
+  .summary-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; margin-bottom: 18px; box-shadow: var(--shadow);
+  }
+  .summary-top { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
+  .summary-top h2 { font-size: 19px; }
+  .summary-stats { display: flex; gap: 18px; font-size: 13px; color: var(--text-secondary); }
+  .summary-stats span b { color: var(--text); font-family: 'IBM Plex Mono', monospace; font-weight: 600; }
+  .healthbar { display: flex; height: 10px; border-radius: 6px; overflow: hidden; background: var(--panel-2); }
+  .healthbar div { height: 100%; transition: width 0.5s ease; }
+  .healthbar-legend { display: flex; gap: 16px; margin-top: 10px; font-size: 12.5px; color: var(--text-secondary); flex-wrap: wrap; }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+
+  /* ---------- Herd grid ---------- */
+  .herd-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 12px;
+  }
+  .animal-card {
+    background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--healthy);
+    border-radius: 10px; padding: 13px 14px; cursor: pointer; box-shadow: var(--shadow);
+    transition: transform 0.12s ease;
+  }
+  .animal-card:hover { transform: translateY(-2px); }
+  .animal-card.tier-warning { border-left-color: var(--warning); }
+  .animal-card.tier-critical { border-left-color: var(--critical); }
+  .animal-card .tag { font-size: 13.5px; font-weight: 600; }
+  .animal-card .breed { font-size: 11.5px; color: var(--text-secondary); margin-bottom: 8px; }
+  .animal-card .readouts { display: flex; justify-content: space-between; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; }
+  .animal-card .readouts .r { display: flex; flex-direction: column; }
+  .animal-card .readouts .r span:first-child { color: var(--text-secondary); font-family: 'IBM Plex Sans', sans-serif; font-size: 10.5px; }
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 500;
+    padding: 3px 8px; border-radius: 20px; margin-top: 9px;
+    background: var(--healthy-bg); color: var(--healthy);
+  }
+  .status-pill.warning { background: var(--warning-bg); color: var(--warning); }
+  .status-pill.critical { background: var(--critical-bg); color: var(--critical); }
+  .status-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  /* ---------- Alert feed ---------- */
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
+  .panel-head { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .panel-head h3 { font-size: 15.5px; }
+  .panel-head .count { font-size: 12px; color: var(--text-secondary); }
+  .alert-list { max-height: 560px; overflow-y: auto; padding: 8px; }
+  .alert-item { padding: 10px 10px; border-radius: 8px; margin-bottom: 4px; cursor: pointer; }
+  .alert-item:hover { background: var(--panel-2); }
+  .alert-item .row1 { display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; font-weight: 600; }
+  .alert-item .row1 .tier-tag { font-size: 10px; padding: 2px 7px; border-radius: 20px; font-weight: 600; }
+  .tier-tag.critical { background: var(--critical-bg); color: var(--critical); }
+  .tier-tag.warning { background: var(--warning-bg); color: var(--warning); }
+  .tier-tag.trending { background: var(--data-bg); color: var(--data); }
+  .alert-item .msg { font-size: 12px; color: var(--text-secondary); margin-top: 3px; line-height: 1.4; }
+  .alert-item .time { font-size: 10.5px; color: var(--text-secondary); font-family: 'IBM Plex Mono', monospace; margin-top: 3px; }
+  .empty-note { padding: 24px 16px; text-align: center; color: var(--text-secondary); font-size: 12.5px; }
+
+  /* ---------- Drawer ---------- */
+  .scrim { position: fixed; inset: 0; background: rgba(10,12,8,0.45); z-index: 90; opacity: 0; pointer-events: none; transition: opacity 0.2s ease; }
+  .scrim.open { opacity: 1; pointer-events: auto; }
+  .drawer {
+    position: fixed; top: 0; right: -440px; width: 420px; max-width: 92vw; height: 100%;
+    background: var(--panel); z-index: 91; box-shadow: -8px 0 30px rgba(0,0,0,0.2);
+    transition: right 0.25s ease; overflow-y: auto;
+    padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .drawer.open { right: 0; }
+  .drawer-head { padding: 18px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: flex-start; }
+  .drawer-head h2 { font-size: 21px; }
+  .drawer-head .breed { color: var(--text-secondary); font-size: 13px; }
+  .drawer-close { border: none; background: var(--panel-2); width: 30px; height: 30px; border-radius: 8px; cursor: pointer; color: var(--text); font-size: 15px; }
+  .drawer-body { padding: 18px 20px; }
+  .vital-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 18px; }
+  .vital { background: var(--panel-2); border-radius: 9px; padding: 10px 8px; text-align: center; }
+  .vital .v { font-family: 'IBM Plex Mono', monospace; font-size: 17px; font-weight: 600; }
+  .vital .l { font-size: 10px; color: var(--text-secondary); margin-top: 2px; }
+  .section-label { font-size: 12.5px; font-weight: 600; color: var(--text-secondary); margin: 20px 0 8px; }
+  .chart-box { height: 150px; margin-bottom: 6px; }
+  .reason-list { list-style: none; padding: 0; margin: 0; }
+  .reason-list li { font-size: 12.5px; padding: 7px 0; border-bottom: 1px solid var(--border); display: flex; gap: 8px; }
+  .reason-list li:last-child { border-bottom: none; }
+  .reason-list .ok { color: var(--healthy); }
+  .reason-list .bad { color: var(--critical); }
+  .model-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .model-table th { text-align: left; color: var(--text-secondary); font-weight: 500; padding: 5px 0; font-size: 11.5px; border-bottom: 1px solid var(--border); }
+  .model-table td { padding: 7px 0; border-bottom: 1px solid var(--border); }
+  .model-table tr:last-child td { border-bottom: none; }
+  .vote-yes { color: var(--critical); font-weight: 600; }
+  .vote-no { color: var(--healthy); font-weight: 600; }
+  .actions { display: flex; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
+  .actions button {
+    flex: 1; min-width: 110px; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--panel-2); color: var(--text); font-size: 12px; font-weight: 500; cursor: pointer;
+  }
+  .actions button:hover { background: var(--border); }
+  .prognosis-text { font-size: 13px; line-height: 1.55; color: var(--text); background: var(--panel-2); padding: 12px 13px; border-radius: 9px; }
+
+  /* ---------- Architecture section ---------- */
+  .arch-section { margin-top: 30px; }
+  .arch-toggle {
+    width: 100%; text-align: left; background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px 18px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;
+    box-shadow: var(--shadow); color: var(--text);
+  }
+  .arch-toggle h3 { font-size: 15.5px; }
+  .arch-toggle span.sub { display: block; font-size: 12px; color: var(--text-secondary); font-weight: 400; margin-top: 2px; }
+  .arch-body { display: none; padding: 20px 4px 0; }
+  .arch-body.open { display: block; }
+  .layer-strip { display: grid; gap: 8px; margin-top: 14px; }
+  .layer {
+    display: grid; grid-template-columns: 34px 150px 1fr; gap: 12px; align-items: center;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 9px; padding: 11px 14px;
+  }
+  .layer .num { font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: var(--data); font-weight: 600; }
+  .layer .name { font-size: 13px; font-weight: 600; }
+  .layer .desc { font-size: 12px; color: var(--text-secondary); }
+  @media (max-width: 640px) { .layer { grid-template-columns: 1fr; } }
+
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: var(--text); color: var(--bg); padding: 10px 18px; border-radius: 30px;
+    font-size: 13px; font-weight: 500; z-index: 200; opacity: 0; pointer-events: none;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .scale-note { font-size: 11.5px; color: var(--text-secondary); margin-top: 8px; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 8px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <h1>Herdwatch</h1>
+      <span class="sub">Smart Cattle Health Monitoring — Prototype</span>
+    </div>
+    <div class="simclock">Farm sim time <b id="simTime">Day 1, 06:00</b></div>
+    <div class="tabs">
+      <button id="tabFarmer" class="active">Farmer view</button>
+      <button id="tabVet">Vet view</button>
+    </div>
+    <button class="theme-toggle" id="themeToggle" title="Toggle theme">◐</button>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <div class="summary-card">
+    <div class="summary-top">
+      <h2 id="viewTitle">Herd overview</h2>
+      <div class="summary-stats">
+        <span>Animals <b id="statTotal">12</b></span>
+        <span>Avg wellness <b id="statAvg">—</b></span>
+        <span>Active alerts <b id="statAlerts">0</b></span>
+      </div>
+    </div>
+    <div class="healthbar" id="healthbar"></div>
+    <div class="healthbar-legend">
+      <span><i class="legend-dot" style="background:var(--healthy)"></i>Healthy</span>
+      <span><i class="legend-dot" style="background:var(--warning)"></i>Warning</span>
+      <span><i class="legend-dot" style="background:var(--critical)"></i>Critical</span>
+    </div>
+  </div>
+
+  <div class="grid-main">
+    <div class="herd-grid" id="herdGrid"></div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h3>Alert feed</h3>
+        <span class="count" id="alertCount">0 events</span>
+      </div>
+      <div class="alert-list" id="alertList">
+        <div class="empty-note">No alerts yet. Sensors are establishing personalized baselines.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arch-section">
+    <button class="arch-toggle" id="archToggle">
+      <div>
+        <h3>How this prototype maps to the proposed system</h3>
+        <span class="sub">7-layer architecture — sensing to farmer/vet interface</span>
+      </div>
+      <span id="archIcon">▾</span>
+    </button>
+    <div class="arch-body" id="archBody">
+      <div class="layer-strip">
+        <div class="layer"><div class="num">01</div><div class="name">Sensing</div><div class="desc">Simulated collar readings: core temperature, heart rate, 3-axis activity, rumination — sampled every simulated 30 minutes, mirroring the 1–5 min collar interval at demo speed.</div></div>
+        <div class="layer"><div class="num">02</div><div class="name">Connectivity</div><div class="desc">Represented here as the in-browser tick loop standing in for the LoRaWAN/cellular + MQTT transport layer.</div></div>
+        <div class="layer"><div class="num">03</div><div class="name">Edge computing</div><div class="desc">Each tick computes personalized baseline deviation, rate-of-change, HR zone, and a lameness probability score client-side — no server round trip, matching the edge-inference design.</div></div>
+        <div class="layer"><div class="num">04</div><div class="name">ML ensemble</div><div class="desc">Three lightweight stand-ins for the poster's models: a classifier (Model A), a multivariate outlier detector (Model B), and a trend/slope model (Model C). An alert fires only on ≥2-model consensus.</div></div>
+        <div class="layer"><div class="num">05</div><div class="name">Alert engine</div><div class="desc">Critical / Warning / Trending tiers, triggered by the same thresholds described in the design: sustained temperature deviation, HR zone breach, immobility, rumination cessation, or composite wellness score.</div></div>
+        <div class="layer"><div class="num">06</div><div class="name">Data & insights</div><div class="desc">In-memory rolling history per animal (last 24 simulated hours) drives the trend charts — standing in for the time-series store.</div></div>
+        <div class="layer"><div class="num">07</div><div class="name">Farmer / vet interface</div><div class="desc">This dashboard: color-coded herd view + quick actions for farmers, diagnostic reasoning + model votes for vets.</div></div>
+      </div>
+      <p class="scale-note">Prototype scope: 12 simulated animals, rule-based stand-ins for the SVM / Isolation Forest / LSTM ensemble, and no real hardware, network, or cloud layer — built to demonstrate the decision logic and UX of the full architecture end to end.</p>
+    </div>
+  </div>
+
+</div>
+
+<div class="scrim" id="scrim"></div>
+<div class="drawer" id="drawer">
+  <div class="drawer-head">
+    <div>
+      <h2 id="drTag">—</h2>
+      <div class="breed" id="drBreed">—</div>
+    </div>
+    <button class="drawer-close" id="drClose">✕</button>
+  </div>
+  <div class="drawer-body">
+    <div class="vital-row">
+      <div class="vital"><div class="v" id="vTemp">—</div><div class="l">Temp °C</div></div>
+      <div class="vital"><div class="v" id="vHr">—</div><div class="l">HR bpm</div></div>
+      <div class="vital"><div class="v" id="vAct">—</div><div class="l">Activity</div></div>
+      <div class="vital"><div class="v" id="vScore">—</div><div class="l">Wellness</div></div>
+    </div>
+
+    <div class="section-label">24h trend — temperature vs. personalized baseline</div>
+    <div class="chart-box"><canvas id="chartTemp"></canvas></div>
+
+    <div class="section-label">24h trend — heart rate &amp; activity index</div>
+    <div class="chart-box"><canvas id="chartHrAct"></canvas></div>
+
+    <div class="section-label">Why this status — edge feature reasoning</div>
+    <ul class="reason-list" id="reasonList"></ul>
+
+    <div class="section-label">Ensemble model consensus</div>
+    <table class="model-table">
+      <thead><tr><th>Model</th><th>Signal</th><th>Reading</th><th>Vote</th></tr></thead>
+      <tbody id="modelTableBody"></tbody>
+    </table>
+
+    <div class="section-label" id="progLabel" style="display:none;">Prognostic note</div>
+    <div class="prognosis-text" id="prognosisText" style="display:none;"></div>
+
+    <div class="actions">
+      <button data-act="vet">Schedule vet visit</button>
+      <button data-act="isolate">Isolate animal</button>
+      <button data-act="note">Log manual note</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ---------------- Theme toggle ---------------- */
+  var root = document.documentElement;
+  var themeBtn = document.getElementById('themeToggle');
+  var currentTheme = null;
+  themeBtn.addEventListener('click', function(){
+    currentTheme = (currentTheme === 'dark') ? 'light' : 'dark';
+    root.setAttribute('data-theme', currentTheme);
+    themeBtn.textContent = currentTheme === 'dark' ? '☀' : '◐';
+    setTimeout(function(){ redrawCharts(); }, 60);
+  });
+
+  /* ---------------- View state ---------------- */
+  var view = 'farmer'; // farmer | vet
+  var tabFarmer = document.getElementById('tabFarmer');
+  var tabVet = document.getElementById('tabVet');
+  var viewTitle = document.getElementById('viewTitle');
+  tabFarmer.addEventListener('click', function(){ setView('farmer'); });
+  tabVet.addEventListener('click', function(){ setView('vet'); });
+  function setView(v){
+    view = v;
+    tabFarmer.classList.toggle('active', v==='farmer');
+    tabVet.classList.toggle('active', v==='vet');
+    viewTitle.textContent = v==='farmer' ? 'Herd overview' : 'Herd diagnostics';
+    render();
+    if (openAnimalId !== null) openDrawer(openAnimalId);
+  }
+
+  /* ---------------- Simulated herd ---------------- */
+  var BREEDS = ['Holstein','Jersey','Gir','Sahiwal','Holstein','Jersey'];
+  var NAMES_TAG = ['COW-014','COW-027','COW-033','COW-041','COW-052','COW-058','COW-063','COW-071','COW-084','COW-090','COW-097','COW-105'];
+
+  function rand(a,b){ return a + Math.random()*(b-a); }
+  function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
+
+  var animals = NAMES_TAG.map(function(tag, i){
+    var baseTemp = rand(38.4, 39.1);
+    var baseHr = rand(60, 76);
+    var baseAct = rand(45, 65);
+    var baseRumination = rand(420, 500); // minutes/day baseline
+    return {
+      id: i,
+      tag: tag,
+      breed: BREEDS[i % BREEDS.length],
+      baseTemp: baseTemp, baseHr: baseHr, baseAct: baseAct, baseRum: baseRumination,
+      temp: baseTemp, hr: baseHr, act: baseAct, rum: baseRumination,
+      immobileHours: 0,
+      ruminationCessationHours: 0,
+      history: { t: [], temp: [], hr: [], act: [], score: [] },
+      tier: 'healthy', // healthy | trending | warning | critical
+      wellnessScore: 90,
+      lastTierChange: null,
+      reasons: [],
+      votes: [],
+      prognosis: null,
+      scenario: null
+    };
+  });
+
+  // Scripted anomaly scenarios so the demo reliably shows detection working.
+  // tickStart: sim-tick at which the scenario begins; type controls the injected deviation pattern.
+  var SCENARIOS = [
+    { animalId: 2, tickStart: 6,  type: 'feverInfection', label: 'suspected mastitis-pattern fever' },
+    { animalId: 7, tickStart: 14, type: 'lameness',        label: 'gait irregularity / suspected lameness' },
+    { animalId: 5, tickStart: 22, type: 'immobility',      label: 'prolonged immobility' },
+    { animalId: 10, tickStart: 10, type: 'gradualDecline', label: 'gradual multi-day decline' }
+  ];
+
+  var tick = 0;
+  var simMinutesPerTick = 30;
+  var alerts = []; // {id, animalId, tier, msg, tickTime}
+  var openAnimalId = null;
+
+  function scenarioFor(animalId){
+    return SCENARIOS.find(function(s){ return s.animalId === animalId; });
+  }
+
+  function simTimeLabel(){
+    var totalMin = tick * simMinutesPerTick;
+    var day = Math.floor(totalMin / (24*60)) + 1;
+    var minOfDay = totalMin % (24*60);
+    var hh = Math.floor(minOfDay/60) + 6; // start at 06:00
+    var mm = minOfDay % 60;
+    var dayAdj = day, hhAdj = hh;
+    if (hhAdj >= 24) { hhAdj -= 24; dayAdj += 1; }
+    return 'Day ' + dayAdj + ', ' + String(hhAdj).padStart(2,'0') + ':' + String(mm).padStart(2,'0');
+  }
+
+  function stepAnimal(a){
+    var sc = scenarioFor(a.id);
+    var elapsed = sc ? (tick - sc.tickStart) : -1;
+    var active = sc && elapsed >= 0;
+
+    // baseline drift + small noise
+    var temp = a.baseTemp + rand(-0.12,0.12);
+    var hr = a.baseHr + rand(-3,3);
+    var act = clamp(a.baseAct + rand(-8,8), 5, 100);
+    var rumDelta = rand(-15,15);
+
+    if (active) {
+      if (sc.type === 'feverInfection') {
+        var prog = clamp(elapsed/6, 0, 1);
+        temp += 0.6 + prog*1.9;      // ramps toward +2.5°C
+        hr += 8 + prog*18;
+        act -= prog*20;
+        rumDelta -= prog*30;
+      } else if (sc.type === 'lameness') {
+        var prog2 = clamp(elapsed/8, 0, 1);
+        act -= prog2*30;             // uneven, reduced activity
+        act += rand(-6,6);           // gait irregularity noise
+        hr += prog2*4;
+        temp += rand(-0.1,0.15);
+      } else if (sc.type === 'immobility') {
+        act = clamp(5 + rand(-2,2), 1, 15);
+        a.immobileHours += simMinutesPerTick/60;
+        temp += 0.15;
+        rumDelta -= 20;
+      } else if (sc.type === 'gradualDecline') {
+        var prog3 = clamp(elapsed/16, 0, 1);
+        temp += prog3*0.9;
+        act -= prog3*15;
+        hr += prog3*7;
+        rumDelta -= prog3*15;
+      }
+    } else {
+      a.immobileHours = Math.max(0, a.immobileHours - simMinutesPerTick/60);
+    }
+
+    if (!(sc && sc.type==='immobility' && active)) {
+      // normal decay of immobility flag when not in that scenario
+    }
+
+    a.rum = clamp(a.rum*0.9 + (a.baseRum + rumDelta)*0.1, 60, 600);
+    var ruminationLowNow = a.rum < a.baseRum*0.55;
+    a.ruminationCessationHours = ruminationLowNow ? a.ruminationCessationHours + simMinutesPerTick/60 : Math.max(0, a.ruminationCessationHours - simMinutesPerTick/60);
+
+    a.temp = clamp(temp, 36.5, 42.5);
+    a.hr = clamp(hr, 40, 160);
+    a.act = clamp(act, 1, 100);
+
+    // ---- Edge feature engineering ----
+    var tempDev = a.temp - a.baseTemp;
+    var hrDev = a.hr - a.baseHr;
+    var actDev = a.act - a.baseAct;
+    var hrOutOfZone = a.hr < 48 || a.hr > 100;
+    var immobileCritical = a.immobileHours >= 4;
+    var ruminationCritical = a.ruminationCessationHours >= 8;
+
+    // history for slope calc
+    a.history.t.push(tick);
+    a.history.temp.push(+a.temp.toFixed(2));
+    a.history.hr.push(Math.round(a.hr));
+    a.history.act.push(Math.round(a.act));
+    var MAXLEN = 48;
+    if (a.history.t.length > MAXLEN) {
+      a.history.t.shift(); a.history.temp.shift(); a.history.hr.shift(); a.history.act.shift(); a.history.score.shift();
+    }
+
+    var n = a.history.temp.length;
+    var recentTemp = a.history.temp.slice(Math.max(0,n-4));
+    var sustainedTempDev = recentTemp.length >= 2 && recentTemp.every(function(v){ return Math.abs(v - a.baseTemp) > 2; });
+    // for demo-visible sustained trigger, relax to "last 2 readings both exceed 1.8"
+    var last2 = a.history.temp.slice(Math.max(0,n-2));
+    var sustainedTempFlag = last2.length===2 && last2.every(function(v){ return Math.abs(v-a.baseTemp) > 1.8; });
+
+    var slopeWindow = a.history.temp.slice(Math.max(0,n-8));
+    var slope = slopeWindow.length >= 4 ? (slopeWindow[slopeWindow.length-1] - slopeWindow[0]) / slopeWindow.length : 0;
+    var actSlopeWindow = a.history.act.slice(Math.max(0,n-8));
+    var actSlope = actSlopeWindow.length >= 4 ? (actSlopeWindow[actSlopeWindow.length-1] - actSlopeWindow[0]) / actSlopeWindow.length : 0;
+
+    var lamenessProb = clamp(50 - actDev*1.3 + Math.abs(actSlope)*8, 0, 100);
+    if (sc && sc.type==='lameness' && active) lamenessProb = clamp(lamenessProb + 25, 0, 100);
+
+    // ---- Model A: classifier stand-in ----
+    var riskScoreA = clamp(Math.abs(tempDev)*22 + Math.abs(hrDev)*1.1 + Math.max(0,-actDev)*0.9, 0, 100);
+    var classA = riskScoreA < 30 ? 'healthy' : (riskScoreA < 60 ? 'at-risk' : 'compromised');
+    var voteA = classA !== 'healthy';
+
+    // ---- Model B: isolation-forest style multivariate outlier ----
+    var normTemp = Math.abs(tempDev)/2.5;
+    var normHr = Math.abs(hrDev)/25;
+    var normAct = Math.abs(actDev)/35;
+    var outlierDist = Math.sqrt(normTemp*normTemp + normHr*normHr + normAct*normAct);
+    var voteB = outlierDist > 0.62;
+
+    // ---- Model C: trend/deterioration stand-in ----
+    var deteriorationProb = clamp(50 + slope*38 + Math.abs(actSlope)*-2.4, 0, 100);
+    var voteC = deteriorationProb > 62;
+
+    var consensus = (voteA?1:0) + (voteB?1:0) + (voteC?1:0);
+
+    var wellness = clamp(96 - Math.abs(tempDev)*16 - Math.abs(hrDev)*0.7 - Math.max(0,-actDev)*0.8 - lamenessProb*0.15, 5, 100);
+    a.wellnessScore = Math.round(wellness);
+    a.history.score.push(a.wellnessScore);
+
+    // ---- Tier decision ----
+    var tier = 'healthy';
+    var reasons = [];
+
+    if (sustainedTempFlag) reasons.push({ ok:false, text:'Temperature deviation exceeds ±1.8°C on 2 consecutive readings' });
+    else reasons.push({ ok:true, text:'Temperature within personalized bounds' });
+
+    if (hrOutOfZone) reasons.push({ ok:false, text:'Heart rate outside physiologically safe zone (' + Math.round(a.hr) + ' bpm)' });
+    else reasons.push({ ok:true, text:'Heart rate within safe zone' });
+
+    if (immobileCritical) reasons.push({ ok:false, text:'Immobility sustained for ' + a.immobileHours.toFixed(1) + 'h (>4h threshold)' });
+    if (ruminationCritical) reasons.push({ ok:false, text:'Rumination cessation for ' + a.ruminationCessationHours.toFixed(1) + 'h (>8h threshold)' });
+    if (!immobileCritical && !ruminationCritical) reasons.push({ ok:true, text:'Rumination and mobility patterns normal' });
+
+    if (lamenessProb > 60) reasons.push({ ok:false, text:'Gait anomaly probability ' + Math.round(lamenessProb) + '% (lameness indicator)' });
+    if (a.wellnessScore < 70) reasons.push({ ok:false, text:'Composite wellness score ' + a.wellnessScore + '% (below 70% threshold)' });
+
+    if (sustainedTempFlag || hrOutOfZone || immobileCritical || ruminationCritical) {
+      tier = 'critical';
+    } else if (a.wellnessScore < 70 || lamenessProb > 60 || consensus >= 2) {
+      tier = 'warning';
+    } else if (Math.abs(slope) > 0.15 && n >= 8) {
+      tier = 'trending';
+      reasons.push({ ok:false, text:'Gradual parameter drift detected over last ' + (n>=8?8:n) + ' readings' });
+    }
+
+    var prevTier = a.tier;
+    a.tier = tier;
+    a.reasons = reasons;
+    a.votes = [
+      { model: 'Model A — Classifier (SVM/XGBoost-style)', signal: 'Multi-feature risk score', reading: Math.round(riskScoreA) + '% (' + classA + ')', vote: voteA },
+      { model: 'Model B — Outlier detector (Isolation Forest-style)', signal: 'Multivariate distance from baseline', reading: outlierDist.toFixed(2) + 'σ-norm', vote: voteB },
+      { model: 'Model C — Trend model (LSTM-style)', signal: '24–48h deterioration probability', reading: Math.round(deteriorationProb) + '%', vote: voteC }
+    ];
+
+    if (tier === 'critical') {
+      a.prognosis = 'Pattern consistent with ' + (sc ? sc.label : 'an acute health event') + '. Recommend on-site veterinary assessment within the next visit window; isolate if gait or temperature does not normalize within 2–4 readings.';
+    } else if (tier === 'warning') {
+      a.prognosis = 'Early divergence from individual baseline. No immediate intervention required — recommend a visual check at next herd pass and continued monitoring.';
+    } else if (tier === 'trending') {
+      a.prognosis = 'Slow multi-reading drift detected. Consistent with early-stage onset; flag for the weekly trending report and re-baseline if pattern persists beyond 3–5 days.';
+    } else {
+      a.prognosis = null;
+    }
+
+    // Log alert on tier escalation only (avoid spam)
+    var order = { healthy:0, trending:1, warning:2, critical:3 };
+    if (order[tier] > order[prevTier] || (tier==='critical' && a.lastTierChange !== tier)) {
+      var msg;
+      if (tier==='critical') msg = 'Tier 1 critical — ' + reasons.filter(function(r){return !r.ok;}).map(function(r){return r.text;})[0];
+      else if (tier==='warning') msg = 'Tier 2 warning — wellness score ' + a.wellnessScore + '%, ' + consensus + '/3 models flagged';
+      else msg = 'Tier 3 trending — gradual parameter drift over recent readings';
+      alerts.unshift({ animalId: a.id, tag: a.tag, tier: tier, msg: msg, time: simTimeLabel() });
+      if (alerts.length > 60) alerts.pop();
+      a.lastTierChange = tier;
+    }
+    if (tier === 'healthy') a.lastTierChange = null;
+  }
+
+  function stepAll(){
+    tick++;
+    animals.forEach(stepAnimal);
+    document.getElementById('simTime').textContent = simTimeLabel();
+    render();
+    if (openAnimalId !== null) refreshDrawer(openAnimalId);
+  }
+
+  /* ---------------- Rendering: herd + summary ---------------- */
+  var herdGrid = document.getElementById('herdGrid');
+  var alertList = document.getElementById('alertList');
+
+  function tierLabel(t){ return t==='critical' ? 'Critical' : t==='warning' ? 'Warning' : t==='trending' ? 'Trending' : 'Healthy'; }
+
+  function render(){
+    // herd grid
+    herdGrid.innerHTML = '';
+    animals.forEach(function(a){
+      var card = document.createElement('div');
+      card.className = 'animal-card' + (a.tier==='warning'||a.tier==='trending' ? ' tier-warning' : a.tier==='critical' ? ' tier-critical' : '');
+      card.innerHTML =
+        '<div class="tag">'+a.tag+'</div>' +
+        '<div class="breed">'+a.breed+'</div>' +
+        '<div class="readouts">' +
+          '<div class="r"><span>Temp</span><span>'+a.temp.toFixed(1)+'°C</span></div>' +
+          '<div class="r"><span>HR</span><span>'+Math.round(a.hr)+' bpm</span></div>' +
+          '<div class="r"><span>Wellness</span><span>'+a.wellnessScore+'%</span></div>' +
+        '</div>' +
+        '<div class="status-pill '+(a.tier==='critical'?'critical':(a.tier==='warning'||a.tier==='trending')?'warning':'')+'"><span class="dot"></span>'+tierLabel(a.tier)+'</div>';
+      card.addEventListener('click', function(){ openDrawer(a.id); });
+      herdGrid.appendChild(card);
+    });
+
+    // summary
+    var counts = { healthy:0, warning:0, critical:0 };
+    var totalScore = 0;
+    animals.forEach(function(a){
+      totalScore += a.wellnessScore;
+      if (a.tier==='critical') counts.critical++;
+      else if (a.tier==='warning'||a.tier==='trending') counts.warning++;
+      else counts.healthy++;
+    });
+    document.getElementById('statTotal').textContent = animals.length;
+    document.getElementById('statAvg').textContent = Math.round(totalScore/animals.length) + '%';
+    document.getElementById('statAlerts').textContent = counts.warning + counts.critical;
+    var hb = document.getElementById('healthbar');
+    var total = animals.length;
+    hb.innerHTML =
+      '<div style="width:'+(counts.healthy/total*100)+'%;background:var(--healthy)"></div>' +
+      '<div style="width:'+(counts.warning/total*100)+'%;background:var(--warning)"></div>' +
+      '<div style="width:'+(counts.critical/total*100)+'%;background:var(--critical)"></div>';
+
+    // alert feed
+    document.getElementById('alertCount').textContent = alerts.length + ' events';
+    if (alerts.length === 0) {
+      alertList.innerHTML = '<div class="empty-note">No alerts yet. Sensors are establishing personalized baselines.</div>';
+    } else {
+      alertList.innerHTML = '';
+      alerts.slice(0,30).forEach(function(al){
+        var item = document.createElement('div');
+        item.className = 'alert-item';
+        item.innerHTML =
+          '<div class="row1"><span>'+al.tag+'</span><span class="tier-tag '+al.tier+'">'+tierLabel(al.tier)+'</span></div>' +
+          '<div class="msg">'+al.msg+'</div>' +
+          '<div class="time">'+al.time+'</div>';
+        item.addEventListener('click', function(){ openDrawer(al.animalId); });
+        alertList.appendChild(item);
+      });
+    }
+  }
+
+  /* ---------------- Drawer + charts ---------------- */
+  var drawer = document.getElementById('drawer');
+  var scrim = document.getElementById('scrim');
+  var chartTemp, chartHrAct;
+
+  document.getElementById('drClose').addEventListener('click', closeDrawer);
+  scrim.addEventListener('click', closeDrawer);
+
+  function closeDrawer(){
+    drawer.classList.remove('open');
+    scrim.classList.remove('open');
+    openAnimalId = null;
+  }
+
+  function cssVar(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+  function openDrawer(id){
+    openAnimalId = id;
+    drawer.classList.add('open');
+    scrim.classList.add('open');
+    refreshDrawer(id, true);
+  }
+
+  function refreshDrawer(id, init){
+    var a = animals.find(function(x){ return x.id===id; });
+    if (!a) return;
+    document.getElementById('drTag').textContent = a.tag;
+    document.getElementById('drBreed').textContent = a.breed + ' · baseline ' + a.baseTemp.toFixed(1) + '°C / ' + Math.round(a.baseHr) + ' bpm';
+    document.getElementById('vTemp').textContent = a.temp.toFixed(1);
+    document.getElementById('vHr').textContent = Math.round(a.hr);
+    document.getElementById('vAct').textContent = Math.round(a.act);
+    document.getElementById('vScore').textContent = a.wellnessScore + '%';
+
+    var labels = a.history.t.map(function(t){ var m = t*simMinutesPerTick; return Math.floor(m/60)+':'+String(m%60).padStart(2,'0'); });
+
+    var healthy = cssVar('--healthy'), warning = cssVar('--warning'), critical = cssVar('--critical'), data = cssVar('--data'), textSec = cssVar('--text-secondary'), border = cssVar('--border');
+
+    var tempCtx = document.getElementById('chartTemp').getContext('2d');
+    var baselineLine = a.history.t.map(function(){ return a.baseTemp; });
+    if (chartTemp) chartTemp.destroy();
+    chartTemp = new Chart(tempCtx, {
+      type: 'line',
+      data: { labels: labels, datasets: [
+        { label: 'Temp', data: a.history.temp, borderColor: critical, backgroundColor: 'transparent', tension: 0.3, pointRadius: 0, borderWidth: 2 },
+        { label: 'Baseline', data: baselineLine, borderColor: textSec, borderDash: [4,4], pointRadius: 0, borderWidth: 1.2 }
+      ]},
+      options: chartOpts(border, textSec, false)
+    });
+
+    var haCtx = document.getElementById('chartHrAct').getContext('2d');
+    if (chartHrAct) chartHrAct.destroy();
+    chartHrAct = new Chart(haCtx, {
+      type: 'line',
+      data: { labels: labels, datasets: [
+        { label: 'HR', data: a.history.hr, borderColor: data, backgroundColor: 'transparent', tension: 0.3, pointRadius: 0, borderWidth: 2, yAxisID: 'y' },
+        { label: 'Activity', data: a.history.act, borderColor: warning, backgroundColor: 'transparent', tension: 0.3, pointRadius: 0, borderWidth: 2, yAxisID: 'y' }
+      ]},
+      options: chartOpts(border, textSec, true)
+    });
+
+    // reasons
+    var rl = document.getElementById('reasonList');
+    rl.innerHTML = '';
+    a.reasons.forEach(function(r){
+      var li = document.createElement('li');
+      li.innerHTML = '<span class="'+(r.ok?'ok':'bad')+'">'+(r.ok?'✓':'!')+'</span><span>'+r.text+'</span>';
+      rl.appendChild(li);
+    });
+
+    // model votes — vet view shows full table, farmer view shows condensed
+    var tbody = document.getElementById('modelTableBody');
+    tbody.innerHTML = '';
+    var votesToShow = view === 'vet' ? a.votes : a.votes.slice(0,0);
+    if (view !== 'vet') {
+      document.querySelectorAll('.section-label')[2].style.display = 'none';
+      document.querySelector('.model-table').style.display = 'none';
+    } else {
+      document.querySelectorAll('.section-label')[2].style.display = '';
+      document.querySelector('.model-table').style.display = '';
+      a.votes.forEach(function(v){
+        var tr = document.createElement('tr');
+        tr.innerHTML = '<td>'+v.model+'</td><td>'+v.signal+'</td><td class="mono">'+v.reading+'</td><td class="'+(v.vote?'vote-yes':'vote-no')+'">'+(v.vote?'Flag':'Clear')+'</td>';
+        tbody.appendChild(tr);
+      });
+    }
+
+    var progLabel = document.getElementById('progLabel');
+    var progText = document.getElementById('prognosisText');
+    if (view === 'vet' && a.prognosis) {
+      progLabel.style.display = ''; progText.style.display = '';
+      progText.textContent = a.prognosis;
+    } else {
+      progLabel.style.display = 'none'; progText.style.display = 'none';
+    }
+  }
+
+  function chartOpts(border, textSec, dualAxis){
+    return {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { intersect: false, mode: 'index' },
+      plugins: { legend: { display: true, position: 'top', labels: { color: textSec, boxWidth: 10, font: { size: 10.5 } } } },
+      scales: {
+        x: { grid: { color: border }, ticks: { color: textSec, maxTicksLimit: 6, font: { size: 9.5 } } },
+        y: { grid: { color: border }, ticks: { color: textSec, font: { size: 9.5 } } }
+      }
+    };
+  }
+
+  function redrawCharts(){ if (openAnimalId !== null) refreshDrawer(openAnimalId); }
+
+  /* ---------------- Actions (quick actions in drawer) ---------------- */
+  var toast = document.getElementById('toast');
+  var toastTimer = null;
+  function showToast(msg){
+    toast.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ toast.classList.remove('show'); }, 2200);
+  }
+  document.querySelectorAll('.actions button').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var a = animals.find(function(x){ return x.id===openAnimalId; });
+      if (!a) return;
+      var act = btn.getAttribute('data-act');
+      if (act==='vet') showToast('Vet visit requested for ' + a.tag);
+      else if (act==='isolate') showToast(a.tag + ' flagged for isolation');
+      else showToast('Note logged for ' + a.tag);
+    });
+  });
+
+  /* ---------------- Architecture collapsible ---------------- */
+  var archToggle = document.getElementById('archToggle');
+  var archBody = document.getElementById('archBody');
+  var archIcon = document.getElementById('archIcon');
+  archToggle.addEventListener('click', function(){
+    var open = archBody.classList.toggle('open');
+    archIcon.textContent = open ? '▴' : '▾';
+  });
+
+  /* ---------------- Boot ---------------- */
+  // Pre-run a few silent ticks so the herd has baseline history before the user sees it.
+  for (var i=0;i<3;i++){ tick++; animals.forEach(stepAnimal); }
+  document.getElementById('simTime').textContent = simTimeLabel();
+  render();
+  setInterval(stepAll, 2200);
+
+})();
+</script>
+</body>
+</html>
